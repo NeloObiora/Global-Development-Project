@@ -1,0 +1,236 @@
+---
+title: "Exploring Global Development Patterns Using Principal Component Analysis and Clustering"
+author: "Rita Obiora"
+output: 
+  html_document: 
+    toc: true
+---
+
+## Introduction
+
+This project aim to investigate latent aspects of development and identify patterns in the world using economic factors. Global development is multidimensional. Looking at GDP alone is deceptive; a country might have high wealth but poor literacy or high child mortality. This project aims to move beyond single-metric rankings by using Unsupervised Machine Learning to find hidden patterns in how nations develop. This project applies two key unsupervised methods:
+
+-   Principal Component Analysis (PCA): The PCA algorithm is a dimensionality reduction technique that converts high-dimensional data into a lower-dimensional space, resulting in new, uncorrelated features known as Principal Components (PCs) that capture the most variance (information) from the original data, making it easier to visualise, process, and model by removing redundancy and noise. Most development indicators are highly correlated (eg, as Literacy Rate increases, Life Expectancy etc). PCA transforms the 9 variables into Principal Components (PCs) which are uncorrelated.
+-   K-means clustering: K-means is an unsupervised machine learning approach that splits data points into k unique, non-overlapping clusters with the goal of minimizing the distance between data points and their cluster's centre.
+
+The data used for this project was sourced from World Development Indicators (WDI) database. Year used: 2019 Visit this link to access data [here](https://data.worldbank.org/)
+
+## Loading Libraries and Data
+
+```{r setup, message=FALSE, warning=FALSE}
+library(factoextra)
+library(cluster)
+library(WDI)
+library(tidyverse)
+library(dplyr)
+library("ggplot2")
+library("reshape2")
+library("corrplot")
+library(ggrepel)
+```
+
+```{r}
+indicators <- c( 
+  GDP = "NY.GDP.MKTP.CD", 
+  lifeExp = "SP.DYN.LE00.IN", 
+  fertilityRt = "SP.DYN.TFRT.IN", 
+  education = "SE.SEC.ENRR", 
+  literacyRt = "SE.ADT.LITR.ZS", 
+  populationGth = "SP.POP.GROW", 
+  unemploymentRt = "SL.UEM.TOTL.ZS", 
+  mortalityRt = "SH.DYN.MORT", 
+  CO2Em = "EN.GHG.CO2.IC.MT.CE.AR5" ) 
+global_development <- WDI( 
+  country = "all", 
+  indicator = indicators, 
+  start = 2019, 
+  end = 2019, extra = TRUE )
+
+```
+
+```{r include=FALSE}
+saveRDS(global_development, "global_development.rds")
+```
+
+```{r}
+glimpse(global_development)
+```
+
+## Data Cleaning
+
+```{r}
+missing_in_cols <- sapply(global_development, function(x) sum(is.na(x))/nrow(global_development))
+head(missing_in_cols)
+```
+
+```{r include=FALSE}
+data_clean <- global_development %>%
+  filter(region != "Aggregates") %>%        
+  select(
+    country,
+    iso3c,
+    GDP,
+    lifeExp,
+    fertilityRt,
+    education,
+    literacyRt,
+    populationGth,
+    unemploymentRt,
+    mortalityRt,
+    CO2Em
+  ) %>%
+  drop_na()
+```
+
+```{r}
+numeric_data <- data_clean %>%
+  select(
+    GDP,
+    lifeExp,
+    fertilityRt,
+    education,
+    literacyRt,
+    populationGth,
+    unemploymentRt,
+    mortalityRt,
+    CO2Em
+  )
+```
+
+```{r include=FALSE}
+numeric_long <- numeric_data %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "indicator",
+    values_to = "value"
+  )
+```
+
+Missing values and categorical values: country, are removed to ensure PCA and clustering operate on complete data. That’s why we have to do some preprocessing, and extraction of character data.
+
+## Data Visualization
+
+```{r}
+    ggplot(numeric_long, aes(x = value)) +
+      geom_histogram(bins = 30, fill = "blue", color = "white") +
+      facet_wrap(~ indicator, scales = "free") +
+      theme_minimal() +
+      labs(
+        title = "Distribution of Development Indicators",
+        x = "Value",
+        y = "Frequency"
+      )
+```
+
+```{r}
+ggplot(numeric_long, aes(x = indicator, y = value)) +
+  geom_boxplot(fill = "blue") +
+  theme_minimal() +
+  coord_flip() +
+  labs(
+    title = "Boxplots of Development Indicators",
+    x = "",
+    y = "Value"
+  )
+```
+
+## Standalize
+
+```{r}
+scaled_data <- scale(numeric_data)
+correlation<-cor(scaled_data, method="pearson") 
+corrplot(correlation)
+```
+
+The correlation matrix reveals:
+
+-   Strong Negative Correlation: mortalityRt vs.lifeExp are nagetively correlated .
+
+-   Strong Positive Correlation: Education and literacyRt. This suggests that for many nations, school enrollment and adult literacy are nearly synonymous.
+
+GDP and CO2Em highlights the environmental cost of traditional economic growth(Production).
+
+MortalityRt vs fertiltyRt This validates the data high child mortality is the strongest driver of increased life expectancy.
+
+LifeExp and literacyRt are nearly perfectly correlated. This suggests that education is the ultimate precursor to health resilience.
+
+UnemploymentRt shows the weakest correlations with other factors, suggesting it is a unique economic dimension
+
+```{r warning=FALSE}
+pca_res <- prcomp(scaled_data)
+summary(pca_res)
+plot(pca_res)
+
+pca_scores <- pca_res$x[, 1:2]
+pca_scores
+
+wss_plot <- fviz_nbclust(pca_scores, kmeans, method = "wss")
+wss_plot
+
+set.seed(123)
+kmeans_model <- kmeans(pca_scores, centers = 3, nstart = 25)
+
+final_data <- data_clean %>%
+  mutate(cluster = factor(kmeans_model$cluster))
+final_data$PC1 <- pca_res$x[, 1]
+final_data$PC2 <- pca_res$x[, 2]
+str(kmeans_model)
+
+```
+```{r warning=FALSE, message=FALSE}
+eig_plot <- fviz_eig(pca_res, addlabels = TRUE)
+eig_plot
+```
+
+I decided to use K-means not Clara or PAM because the dataset is relatively small and the variables continuous nature. After standardization and PCA transformation, Euclidean distance becomes appropriate, making K-means a natural efficient and interpretable clustering solution. While alternative algorithms such as PAM and CLARA are designed for robustness or scalability, their advantages are not critical in this context.
+
+The model uses centers = 3. Based on standard development patterns, these clusters usually break down as:
+
+-   Cluster 1 (Developed-Economy): High GDP, high education, low fertility, and low mortality. Associated with high export and imports, good infrastructure and amenities etc.
+
+-   Cluster 2 (Developing-Economy): Moderate growth, rising literacy, but still balancing high population growth or environmental impacts ( CO2Em).
+
+-   Cluster 3 (Underdeveloped-Economy): High mortality, high fertility rates, and lower literacy levels. Associated with low export and imports, low infrastructure and amenities etc.
+
+```{r}
+fviz_cluster(
+  kmeans_model, 
+  data = pca_scores,
+  geom = "point",
+  ellipse.type = "convex",
+  palette = c("#2E9FDF", "#E7B800", "#FC4E07"),
+  ggtheme = theme_minimal(),
+  main = "Global Development: Cluster Distribution",
+  xlab = "PC1",
+  ylab = "PC2"
+) +
+theme(
+  plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+  legend.position = "bottom"
+)
+ggplot(final_data, aes(x = PC1, y = PC2, color = cluster)) +
+  geom_point(alpha = 0.7, size = 3) +
+  scale_color_manual(
+    values = c("#2E9FDF", "#E7B800", "#FC4E07"),
+    labels = c("Developed Economies", "Developing Economies", "Underdeveloped Economies"))+
+  labs(
+    title = "Nations Grouped by Socio-Economic Performance",
+    subtitle = "Analysis based on 2019 World Bank Development Indicators",
+    x = "Principal Component 1",
+    y = "Principal Component 2",
+    color = "Development Group"
+  ) +
+  theme_classic()
+```
+
+By clustering countries based on indicators rather than continents, we find surprising peers.
+
+## Key Findings
+
+Countries that fall into the "High-Development" cluster almost universally have a literacyRt above 90%, suggesting it's importance for economic transition.
+
+The Environmental Paradox: High-income clusters contribute disproportionately to CO2Em, showing that "developed" status currently lacks environmental sustainability.The Demographic Divide: High fertilityRt is the strongest predictor for membership in the "underveloped" cluster, as it often correlates with lower education access.
+
+# Final Conclusion
+
+Using PCA and K-Means, we successfully reduced a complex 9-dimensional dataset into three distinct global profiles. This model suggests prioritizing literacy and mortality reduction over pure GDP growth.
