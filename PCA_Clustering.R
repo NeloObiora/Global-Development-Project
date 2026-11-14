@@ -29,7 +29,7 @@ global_development <- WDI(
   country = "all",
   indicator = indicators,
   start = 2019,
-  end = 2022,
+  end = 2019,
   extra = TRUE
 )
 saveRDS(global_development, "global_development.rds")
